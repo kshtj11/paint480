@@ -127,6 +127,61 @@
     border-radius: 2px;
   }
   
+  /* Color Swatch Button */
+  #color-btn {
+    position: relative;
+  }
+  #color-swatch {
+    width: 22px;
+    height: 22px;
+    border-radius: 50%;
+    background: #000000;
+    border: 2px solid rgba(0,0,0,0.15);
+    pointer-events: none;
+  }
+
+  /* Color Palette Popup */
+  #color-palette {
+    position: absolute;
+    bottom: 64px;
+    left: 16px;
+    background: var(--toolbar-bg);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border-radius: 12px;
+    padding: 10px;
+    display: grid;
+    grid-template-columns: repeat(8, 1fr);
+    gap: 6px;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.25);
+    border: 1px solid rgba(0,0,0,0.08);
+    opacity: 0;
+    transform: translateY(8px) scale(0.95);
+    transition: opacity 0.2s, transform 0.2s;
+    pointer-events: none;
+    z-index: 30;
+  }
+  #color-palette.open {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+    pointer-events: auto;
+  }
+  .color-cell {
+    width: 28px;
+    height: 28px;
+    border-radius: 6px;
+    border: 2px solid transparent;
+    cursor: pointer;
+    transition: transform 0.15s, border-color 0.15s;
+  }
+  .color-cell:hover {
+    transform: scale(1.15);
+  }
+  .color-cell.selected {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 2px rgba(0,0,0,0.15);
+  }
+
   /* Size Indicator */
   #size-indicator {
     position: absolute;
@@ -170,7 +225,11 @@
     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3H5a2 2 0 00-2 2v3m18 0V5a2 2 0 00-2-2h-3m0 18h3a2 2 0 002-2v-3M3 16v3a2 2 0 002 2h3"/></svg>
   </button>
   
+  <div id="color-palette"></div>
   <div id="toolbar">
+    <button id="color-btn" title="Color">
+      <div id="color-swatch"></div>
+    </button>
     <button id="undo-btn" title="Undo">
       <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7v6h6"/><path d="M21 17a9 9 0 00-9-9 9 9 0 00-6 2.3L3 13"/></svg>
     </button>
@@ -202,6 +261,51 @@
   const fullscreenBtn = document.getElementById('fullscreen-btn');
   const toolbar = document.getElementById('toolbar');
   const sizeIndicator = document.getElementById('size-indicator');
+
+  const colorBtn = document.getElementById('color-btn');
+  const colorSwatch = document.getElementById('color-swatch');
+  const colorPalette = document.getElementById('color-palette');
+
+  // 16-color SNES-era vibrant palette
+  const PALETTE = [
+    '#000000', '#FCFCFC', '#F83800', '#F87858',
+    '#E45C10', '#FCA044', '#F8B800', '#F8D878',
+    '#00A800', '#B8F818', '#0058F8', '#6888FC',
+    '#6644FC', '#D878F8', '#A80020', '#F85898',
+  ];
+
+  let currentColor = '#000000';
+
+  // Build palette cells
+  PALETTE.forEach((color, i) => {
+    const cell = document.createElement('div');
+    cell.className = 'color-cell' + (i === 0 ? ' selected' : '');
+    cell.style.background = color;
+    cell.dataset.color = color;
+    cell.addEventListener('click', (e) => {
+      e.stopPropagation();
+      currentColor = color;
+      colorSwatch.style.background = color;
+      document.querySelectorAll('.color-cell').forEach(c => c.classList.remove('selected'));
+      cell.classList.add('selected');
+      colorPalette.classList.remove('open');
+      if (isEraser) {
+        isEraser = false;
+        eraserBtn.classList.remove('active-tool');
+      }
+    });
+    colorPalette.appendChild(cell);
+  });
+
+  colorBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    colorPalette.classList.toggle('open');
+  });
+
+  document.addEventListener('click', () => {
+    colorPalette.classList.remove('open');
+  });
+  colorPalette.addEventListener('click', (e) => e.stopPropagation());
 
   let isDrawing = false;
   let isEraser = false;
@@ -300,7 +404,7 @@
     
     ctx.beginPath();
     ctx.arc(x, y, sizeSlider.value / 2, 0, Math.PI * 2);
-    ctx.fillStyle = isEraser ? '#ffffff' : '#000000';
+    ctx.fillStyle = isEraser ? '#ffffff' : currentColor;
     ctx.fill();
     
     ctx.beginPath();
@@ -319,7 +423,7 @@
     ctx.lineWidth = sizeSlider.value;
     ctx.lineCap = 'round';
     ctx.lineJoin = 'round';
-    ctx.strokeStyle = isEraser ? '#ffffff' : '#000000';
+    ctx.strokeStyle = isEraser ? '#ffffff' : currentColor;
     
     ctx.lineTo(x, y);
     ctx.stroke();
