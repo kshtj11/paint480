@@ -311,12 +311,6 @@
   let isEraser = false;
   let hasInteracted = false;
 
-  // Double-tap to undo
-  let lastTapTime = 0;
-  let tapStartX = 0;
-  let tapStartY = 0;
-  let wasTap = false;
-  
   const undoStack = [];
   const redoStack = [];
 
@@ -401,6 +395,7 @@
   // Drawing Logic
   function startDrawing(e) {
     if (e.target !== canvas) return;
+    if (e.touches && e.touches.length > 1) return;
     isDrawing = true;
     hasInteracted = true;
 
@@ -409,10 +404,6 @@
     const drawColor = isEraser ? '#ffffff' : currentColor;
     const size = sizeSlider.value;
     const { x, y } = getCoords(e);
-
-    tapStartX = x;
-    tapStartY = y;
-    wasTap = true;
 
     ctx.lineWidth = size;
     ctx.lineCap = 'round';
@@ -434,14 +425,6 @@
     if (!isDrawing) return;
     e.preventDefault();
 
-    if (wasTap) {
-      const check = e.touches ? e.touches[0] : e;
-      const rect = cachedRect;
-      const cx = (check.clientX - rect.left) * (canvas.width / rect.width);
-      const cy = (check.clientY - rect.top) * (canvas.height / rect.height);
-      if (Math.abs(cx - tapStartX) > 8 || Math.abs(cy - tapStartY) > 8) wasTap = false;
-    }
-
     const src = e.touches ? e.touches[0] : e;
     const rect = cachedRect;
     const scaleX = canvas.width / rect.width;
@@ -459,28 +442,34 @@
     if (isDrawing) {
       isDrawing = false;
 
-      const now = Date.now();
-      if (wasTap && now - lastTapTime < 350) {
-        // Double-tap undo: discard dot2 (not saved) + dot1 state (first tap), then undo
-        if (undoStack.length > 1) undoStack.pop();
-        ctx.putImageData(undoStack[undoStack.length - 1], 0, 0);
-        undoBtn.click();
-        lastTapTime = 0;
-      } else {
-        saveState();
-        if (wasTap) lastTapTime = now;
-      }
+      saveState();
 
       toolbar.classList.add('active');
       resetToolbarTimer();
     }
   }
 
+  // Two-finger tap to undo
+  canvas.addEventListener('touchstart', (e) => {
+    if (e.touches.length === 2) {
+      e.preventDefault();
+      if (isDrawing) {
+        // Cancel in-progress stroke, revert canvas
+        isDrawing = false;
+        if (undoStack.length > 0) {
+          ctx.putImageData(undoStack[undoStack.length - 1], 0, 0);
+        }
+      }
+      undoBtn.click();
+      return;
+    }
+  }, { passive: false });
+
   // Event Listeners
   canvas.addEventListener('mousedown', startDrawing);
   canvas.addEventListener('mousemove', draw);
   window.addEventListener('mouseup', stopDrawing);
-  
+
   canvas.addEventListener('touchstart', startDrawing, { passive: false });
   canvas.addEventListener('touchmove', draw, { passive: false });
   window.addEventListener('touchend', stopDrawing);
