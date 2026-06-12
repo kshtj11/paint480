@@ -251,7 +251,7 @@
 <script>
   const container = document.getElementById('app-container');
   const canvas = document.getElementById('paintCanvas');
-  const ctx = canvas.getContext('2d', { willReadFrequently: true });
+  const ctx = canvas.getContext('2d');
   
   const undoBtn = document.getElementById('undo-btn');
   const redoBtn = document.getElementById('redo-btn');
@@ -322,20 +322,26 @@
   clearCanvas();
   saveState();
 
+  // Cache bounding rect — recalculate only on resize/fullscreen
+  let cachedRect = null;
+  function updateCachedRect() {
+    cachedRect = canvas.getBoundingClientRect();
+  }
+
   // Resize handler for responsive scaling
   function resize() {
     const padding = 20;
     const availableWidth = window.innerWidth - padding;
     const availableHeight = window.innerHeight - padding;
-    
-    // Calculate scale to fit within viewport
+
     const scale = Math.min(
       availableWidth / 540,
       availableHeight / 620,
-      1 // Don't scale up past original size
+      1
     );
-    
+
     container.style.transform = `scale(${scale})`;
+    requestAnimationFrame(updateCachedRect);
   }
   window.addEventListener('resize', resize);
   resize();
@@ -369,28 +375,20 @@
       fullscreenBtn.style.display = 'flex';
       container.style.borderRadius = '8px';
     }
-    setTimeout(resize, 100);
+    setTimeout(() => { resize(); updateCachedRect(); }, 100);
   });
 
-  // Utility to get precise coordinates regardless of CSS scale
-  function getCoords(e) {
-    const rect = canvas.getBoundingClientRect();
-    let clientX, clientY;
-    
-    if (e.touches && e.touches.length > 0) {
-      clientX = e.touches[0].clientX;
-      clientY = e.touches[0].clientY;
-    } else {
-      clientX = e.clientX;
-      clientY = e.clientY;
-    }
+  const coordScaleX = canvas.width / 540;
+  const coordScaleY = canvas.height / 620;
 
+  function getCoords(e) {
+    const rect = cachedRect;
+    const src = e.touches ? e.touches[0] : e;
     const scaleX = canvas.width / rect.width;
     const scaleY = canvas.height / rect.height;
-
     return {
-      x: (clientX - rect.left) * scaleX,
-      y: (clientY - rect.top) * scaleY
+      x: (src.clientX - rect.left) * scaleX,
+      y: (src.clientY - rect.top) * scaleY
     };
   }
 
@@ -399,32 +397,40 @@
     if (e.target !== canvas) return;
     isDrawing = true;
     hasInteracted = true;
-    
+
+    updateCachedRect();
+
+    const drawColor = isEraser ? '#ffffff' : currentColor;
+    const size = sizeSlider.value;
     const { x, y } = getCoords(e);
-    
+
+    ctx.lineWidth = size;
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    ctx.strokeStyle = drawColor;
+    ctx.fillStyle = drawColor;
+
     ctx.beginPath();
-    ctx.arc(x, y, sizeSlider.value / 2, 0, Math.PI * 2);
-    ctx.fillStyle = isEraser ? '#ffffff' : currentColor;
+    ctx.arc(x, y, size / 2, 0, Math.PI * 2);
     ctx.fill();
-    
+
     ctx.beginPath();
     ctx.moveTo(x, y);
-    
-    // Hide toolbar while drawing
+
     toolbar.classList.remove('active');
   }
 
   function draw(e) {
     if (!isDrawing) return;
-    e.preventDefault(); // Critical for touch devices to prevent scrolling
-    
-    const { x, y } = getCoords(e);
-    
-    ctx.lineWidth = sizeSlider.value;
-    ctx.lineCap = 'round';
-    ctx.lineJoin = 'round';
-    ctx.strokeStyle = isEraser ? '#ffffff' : currentColor;
-    
+    e.preventDefault();
+
+    const src = e.touches ? e.touches[0] : e;
+    const rect = cachedRect;
+    const scaleX = canvas.width / rect.width;
+    const scaleY = canvas.height / rect.height;
+    const x = (src.clientX - rect.left) * scaleX;
+    const y = (src.clientY - rect.top) * scaleY;
+
     ctx.lineTo(x, y);
     ctx.stroke();
     ctx.beginPath();
@@ -465,11 +471,16 @@
     }, 3000);
   }
 
-  // Wake toolbar on touch/move near bottom
-  container.addEventListener('mousemove', (e) => {
-    resetToolbarTimer();
+  // Wake toolbar on touch/move — throttled to avoid spamming timers
+  let lastToolbarWake = 0;
+  container.addEventListener('mousemove', () => {
+    const now = Date.now();
+    if (now - lastToolbarWake > 500) {
+      lastToolbarWake = now;
+      resetToolbarTimer();
+    }
   });
-  container.addEventListener('touchstart', (e) => {
+  container.addEventListener('touchstart', () => {
     resetToolbarTimer();
   }, { passive: true });
 
@@ -500,10 +511,10 @@
     }, 1000);
   });
 
-  // History (Undo/Redo)
+  // History (Undo/Redo) — uses raw ImageData instead of toDataURL for speed
   function saveState() {
     if (undoStack.length > 20) undoStack.shift();
-    undoStack.push(canvas.toDataURL());
+    undoStack.push(ctx.getImageData(0, 0, canvas.width, canvas.height));
     redoStack.length = 0;
     updateHistoryButtons();
   }
@@ -516,13 +527,7 @@
   undoBtn.addEventListener('click', () => {
     if (undoStack.length > 1) {
       redoStack.push(undoStack.pop());
-      const state = undoStack[undoStack.length - 1];
-      const img = new Image();
-      img.onload = () => {
-        ctx.clearRect(0, 0, canvas.width, canvas.height);
-        ctx.drawImage(img, 0, 0);
-      };
-      img.src = state;
+      ctx.putImageData(undoStack[undoStack.length - 1], 0, 0);
       updateHistoryButtons();
     }
   });
@@ -531,12 +536,7 @@
     if (redoStack.length > 0) {
       const state = redoStack.pop();
       undoStack.push(state);
-      const img = new Image();
-      img.onload = () => {
-        ctx.clearRect(0, 0, canvas.width, canvas.height);
-        ctx.drawImage(img, 0, 0);
-      };
-      img.src = state;
+      ctx.putImageData(state, 0, 0);
       updateHistoryButtons();
     }
   });
