@@ -406,6 +406,55 @@
     ctx.moveTo(pts[pts.length - 2], pts[pts.length - 1]);
   }
 
+  // Line-snap state: hold still 300ms at end of stroke → snaps to straight line
+  let strokeStartX = 0, strokeStartY = 0;
+  let lastMoveX = 0, lastMoveY = 0;
+  let preStrokeData = null;
+  let freehandBackup = null;
+  let lineSnapped = false;
+  let snapTimer = 0;
+  let drawColor = '#000000';
+  let drawSize = 4;
+
+  function showLinePreview() {
+    freehandBackup = ctx.getImageData(0, 0, canvas.width, canvas.height);
+    ctx.putImageData(preStrokeData, 0, 0);
+
+    ctx.lineWidth = drawSize;
+    ctx.lineCap = 'round';
+    ctx.strokeStyle = drawColor;
+    ctx.fillStyle = drawColor;
+
+    const r = drawSize / 2;
+    ctx.beginPath();
+    ctx.arc(strokeStartX, strokeStartY, r, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.arc(lastMoveX, lastMoveY, r, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.beginPath();
+    ctx.moveTo(strokeStartX, strokeStartY);
+    ctx.lineTo(lastMoveX, lastMoveY);
+    ctx.stroke();
+
+    lineSnapped = true;
+  }
+
+  function cancelLineSnap() {
+    if (lineSnapped && freehandBackup) {
+      ctx.putImageData(freehandBackup, 0, 0);
+      freehandBackup = null;
+      lineSnapped = false;
+      ctx.lineWidth = drawSize;
+      ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
+      ctx.strokeStyle = drawColor;
+      ctx.beginPath();
+      ctx.moveTo(lastMoveX, lastMoveY);
+    }
+  }
+
   // Drawing Logic
   function startDrawing(e) {
     if (e.target !== canvas) return;
@@ -415,24 +464,35 @@
 
     cacheScaleFactors();
 
-    const drawColor = isEraser ? '#ffffff' : currentColor;
-    const size = sizeSlider.value;
+    drawColor = isEraser ? '#ffffff' : currentColor;
+    drawSize = sizeSlider.value;
     const src = e.touches ? e.touches[0] : e;
     const x = (src.clientX - rectLeft) * scaleX;
     const y = (src.clientY - rectTop) * scaleY;
 
-    ctx.lineWidth = size;
+    strokeStartX = x;
+    strokeStartY = y;
+    lastMoveX = x;
+    lastMoveY = y;
+    lineSnapped = false;
+    freehandBackup = null;
+    preStrokeData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+
+    ctx.lineWidth = drawSize;
     ctx.lineCap = 'round';
     ctx.lineJoin = 'round';
     ctx.strokeStyle = drawColor;
     ctx.fillStyle = drawColor;
 
     ctx.beginPath();
-    ctx.arc(x, y, size / 2, 0, Math.PI * 2);
+    ctx.arc(x, y, drawSize / 2, 0, Math.PI * 2);
     ctx.fill();
 
     ctx.beginPath();
     ctx.moveTo(x, y);
+
+    clearTimeout(snapTimer);
+    snapTimer = setTimeout(showLinePreview, 600);
 
     toolbar.classList.remove('active');
   }
@@ -442,18 +502,38 @@
     e.preventDefault();
 
     const src = e.touches ? e.touches[0] : e;
-    pendingPoints.push(
-      (src.clientX - rectLeft) * scaleX,
-      (src.clientY - rectTop) * scaleY
-    );
+    const x = (src.clientX - rectLeft) * scaleX;
+    const y = (src.clientY - rectTop) * scaleY;
+    lastMoveX = x;
+    lastMoveY = y;
+
+    clearTimeout(snapTimer);
+
+    if (lineSnapped) {
+      cancelLineSnap();
+    }
+
+    pendingPoints.push(x, y);
     if (!rafId) rafId = requestAnimationFrame(flushDraw);
+
+    snapTimer = setTimeout(showLinePreview, 600);
   }
 
   function stopDrawing() {
     if (isDrawing) {
       isDrawing = false;
+      clearTimeout(snapTimer);
       if (rafId) { cancelAnimationFrame(rafId); rafId = 0; }
-      flushDraw();
+
+      if (lineSnapped) {
+        // Already showing the line preview — just commit it
+        freehandBackup = null;
+      } else {
+        flushDraw();
+      }
+
+      preStrokeData = null;
+      lineSnapped = false;
 
       setTimeout(saveState, 0);
 
